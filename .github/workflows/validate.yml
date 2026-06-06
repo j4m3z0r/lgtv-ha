@@ -16,6 +16,10 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+          # "brands" requires an icon registered in home-assistant/brands,
+          # which is only needed for the HACS default store. Custom-repository
+          # installation (how this is distributed) works without it.
+          ignore: brands
 
   hassfest:
     name: Hassfest
