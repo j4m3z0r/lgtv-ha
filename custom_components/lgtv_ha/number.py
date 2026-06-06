@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .connection import async_guarded_call
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ class LGTVOledBrightness(NumberEntity):
         # Writes go through the luna API (set_settings), which targets the
         # current input/mode context. The ssap setSystemSettings endpoint
         # rejects picture-category writes on this TV ("undefined" key error).
-        await self._client.set_settings("picture", {"backlight": int_value})
+        await async_guarded_call(
+            self.hass,
+            self._entry.entry_id,
+            lambda: self._client.set_settings("picture", {"backlight": int_value}),
+        )
         self._oled_light = int_value
         self.async_write_ha_state()

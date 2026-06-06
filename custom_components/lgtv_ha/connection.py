@@ -1,0 +1,80 @@
+"""Connection health/recovery helpers for the shared WebOsClient.
+
+bscpylgtv's ``is_connected()`` only checks whether the internal connect task is
+still pending — after the TV is powered off it can report ``True`` while the
+underlying websocket is already dead (a "zombie" connection). Relying on it
+alone means the background reconnect never fires and every command fails with
+``ConnectionClosedOK``. These helpers instead probe the connection with a real,
+timeout-bounded request and force a clean reconnect when it isn't actually alive.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
+
+PROBE_TIMEOUT = 5
+RECONNECT_TIMEOUT = 15
+
+
+async def async_is_alive(client) -> bool:
+    """Return True only if the connection actually responds to a request."""
+    if not client.is_connected():
+        return False
+    try:
+        await asyncio.wait_for(client.get_power_state(), timeout=PROBE_TIMEOUT)
+        return True
+    except Exception:  # noqa: BLE001 - any failure means the link is not usable
+        return False
+
+
+async def _async_force_reconnect(client) -> bool:
+    """Tear down any (possibly zombie) connection and connect fresh.
+
+    Callers must hold the per-entry lock.
+    """
+    try:
+        await client.disconnect()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await asyncio.wait_for(client.connect(), timeout=RECONNECT_TIMEOUT)
+    except Exception as ex:  # noqa: BLE001
+        _LOGGER.debug("Reconnect failed: %s", ex)
+        return False
+    return client.is_connected()
+
+
+async def async_health_check(hass, entry_id) -> bool:
+    """Probe the connection and reconnect if it's down/zombie. Returns health."""
+    data = hass.data[DOMAIN].get(entry_id)
+    if data is None:
+        return False
+    client = data["client"]
+    async with data["lock"]:
+        if await async_is_alive(client):
+            return True
+        _LOGGER.debug("Connection not alive; forcing reconnect")
+        return await _async_force_reconnect(client)
+
+
+async def async_guarded_call(hass, entry_id, factory):
+    """Run ``factory()``; on failure, force one reconnect and retry once.
+
+    ``factory`` is a zero-arg callable returning the awaitable to run, so it can
+    be re-invoked on the retry.
+    """
+    data = hass.data[DOMAIN][entry_id]
+    client = data["client"]
+    try:
+        return await factory()
+    except Exception as ex:  # noqa: BLE001 - typically a stale/closed connection
+        _LOGGER.debug("Command failed (%s); reconnecting and retrying", ex)
+        async with data["lock"]:
+            # Another task may have already reconnected while we waited.
+            if not await async_is_alive(client):
+                await _async_force_reconnect(client)
+        return await factory()

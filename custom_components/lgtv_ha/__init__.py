@@ -11,7 +11,6 @@ import subprocess
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -23,9 +22,13 @@ from .const import (
     PLATFORMS,
     SERVICE_SET_OLED_LIGHT,
 )
+from .connection import async_guarded_call, async_health_check
 from .key_storage import InMemoryKeyStorage
 
 _LOGGER = logging.getLogger(__name__)
+
+# How often to probe the connection and reconnect if it's down or zombie.
+HEALTH_CHECK_INTERVAL = 15
 
 # Only attempt the websocket connect once so an unreachable (powered-off) TV
 # fails fast instead of blocking inside bscpylgtv's retry loop.
@@ -61,11 +64,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
 
+    # A TV is off most of the time, so don't fail setup when it's unreachable:
+    # set up anyway (entities show unavailable) and let the health loop connect
+    # once the TV turns on. This also recovers from power-cycles within ~15s.
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
-    except Exception as ex:
-        _LOGGER.warning("Cannot connect to LG TV at %s: %s", host, ex)
-        raise ConfigEntryNotReady(f"Cannot connect to LG TV at {host}") from ex
+    except Exception as ex:  # noqa: BLE001
+        _LOGGER.info(
+            "LG TV at %s not reachable at setup; will connect when it turns on (%s)",
+            host,
+            ex,
+        )
 
     # Backfill MAC address if missing from an older config entry
     if not entry.data.get(CONF_MAC):
@@ -75,15 +84,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 entry, data={**entry.data, CONF_MAC: mac}
             )
 
-    hass.data[DOMAIN][entry.entry_id] = {"client": client}
+    # The lock serializes reconnects across the entities and the health loop.
+    hass.data[DOMAIN][entry.entry_id] = {"client": client, "lock": asyncio.Lock()}
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_services(hass)
 
     entry.async_create_background_task(
         hass,
-        _reconnect_loop(hass, entry),
-        "lgtv_ha_reconnect",
+        _health_loop(hass, entry),
+        "lgtv_ha_health",
     )
 
     return True
@@ -97,19 +107,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-async def _reconnect_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _health_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Periodically probe the connection and reconnect if it's down or zombie."""
     while True:
-        await asyncio.sleep(30)
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if data is None:
+        await asyncio.sleep(HEALTH_CHECK_INTERVAL)
+        if hass.data.get(DOMAIN, {}).get(entry.entry_id) is None:
             return
-        client = data["client"]
-        if not client.is_connected():
-            try:
-                await asyncio.wait_for(client.connect(), timeout=15)
-                _LOGGER.info("Reconnected to LG TV at %s", entry.data[CONF_HOST])
-            except Exception as ex:
-                _LOGGER.debug("Reconnect attempt failed: %s", ex)
+        await async_health_check(hass, entry.entry_id)
 
 
 def _get_mac_address(host: str) -> str | None:
@@ -134,17 +138,22 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def handle_set_oled_light(call: ServiceCall) -> None:
         value = call.data[ATTR_VALUE]
         pic_mode = call.data.get(ATTR_PICTURE_MODE)
-        for data in hass.data.get(DOMAIN, {}).values():
+        for entry_id, data in hass.data.get(DOMAIN, {}).items():
             client = data["client"]
-            if not client.is_connected():
-                continue
-            # Switch picture mode first (if requested) so the OLED light value
-            # is applied to that mode. "backlight" is the webOS OLED-light key.
-            # Writes use the luna API (set_settings), per the picture-category
-            # limitation of the ssap setSystemSettings endpoint on this TV.
-            if pic_mode:
-                await client.set_settings("picture", {"pictureMode": pic_mode})
-            await client.set_settings("picture", {"backlight": value})
+
+            async def _apply(client=client):
+                # Switch picture mode first (if requested) so the OLED light
+                # value applies to that mode. "backlight" is the webOS
+                # OLED-light key. Writes use the luna API (set_settings), per
+                # the ssap setSystemSettings picture-category limitation.
+                if pic_mode:
+                    await client.set_settings("picture", {"pictureMode": pic_mode})
+                await client.set_settings("picture", {"backlight": value})
+
+            try:
+                await async_guarded_call(hass, entry_id, _apply)
+            except Exception as ex:  # noqa: BLE001
+                _LOGGER.warning("set_oled_light failed for %s: %s", entry_id, ex)
 
     hass.services.async_register(
         DOMAIN,
