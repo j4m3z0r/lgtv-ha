@@ -1,0 +1,35 @@
+set_oled_light:
+  name: Set OLED Brightness
+  description: >
+    Set the OLED pixel luminance (brightness) for a specific picture mode.
+    Uses the calibration API — safe to call at any time.
+  fields:
+    picture_mode:
+      name: Picture Mode
+      description: >
+        Picture mode to target (e.g. cinema, expert1, game).
+        Defaults to the currently active picture mode.
+      required: false
+      example: cinema
+      selector:
+        select:
+          options:
+            - cinema
+            - eco
+            - expert1
+            - expert2
+            - game
+            - normal
+            - photo
+            - sports
+            - vivid
+    value:
+      name: Brightness
+      description: OLED brightness level (0–100).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: slider

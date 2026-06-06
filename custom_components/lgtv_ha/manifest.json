@@ -1,0 +1,11 @@
+{
+  "domain": "lgtv_ha",
+  "name": "LG TV",
+  "codeowners": ["@j4m3z0r"],
+  "config_flow": true,
+  "documentation": "https://github.com/j4m3z0r/lgtv-ha/blob/main/README.md",
+  "issue_tracker": "https://github.com/j4m3z0r/lgtv-ha/issues",
+  "iot_class": "local_polling",
+  "requirements": ["bscpylgtv==0.5.1"],
+  "version": "0.2.0"
+}
