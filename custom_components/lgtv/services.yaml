@@ -1,0 +1,28 @@
+set_picture_settings:
+  description: "Set picture settings for the LG TV."
+  target:
+    entity:
+      - domain: media_player
+        integration: lgtv
+  fields:
+    picture_mode:
+      description: "The picture mode to apply the settings to. If not provided, the current mode is used."
+      example: "cinema"
+      selector:
+        text:
+    contrast:
+      description: "The contrast level (0-100)."
+      example: 85
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    oled_brightness:
+      description: "The OLED brightness level (0-100)."
+      example: 60
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
