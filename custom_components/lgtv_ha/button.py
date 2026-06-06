@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .connection import async_guarded_call
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,7 +51,5 @@ class LGTVScreenButton(ButtonEntity):
         return self._client.is_connected()
 
     async def async_press(self) -> None:
-        if self._on:
-            await self._client.turn_screen_on()
-        else:
-            await self._client.turn_screen_off()
+        action = self._client.turn_screen_on if self._on else self._client.turn_screen_off
+        await async_guarded_call(self.hass, self._entry.entry_id, lambda: action())

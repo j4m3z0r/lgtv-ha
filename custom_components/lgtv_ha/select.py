@@ -23,7 +23,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     client = hass.data[DOMAIN][entry.entry_id]["client"]
-    async_add_entities([LGTVPictureMode(client, entry)])
+    async_add_entities([LGTVPictureMode(client, entry), LGTVInput(client, entry)])
 
 
 class LGTVPictureMode(SelectEntity):
@@ -70,3 +70,62 @@ class LGTVPictureMode(SelectEntity):
         )
         self._picture_mode = option
         self.async_write_ha_state()
+
+
+class LGTVInput(SelectEntity):
+    """Selects the active physical input (HDMI, etc.).
+
+    The media_player's source list also includes inputs, but mixes in apps;
+    this entity is just the TV's physical inputs for a clear, dedicated control.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Input"
+    _attr_icon = "mdi:hdmi-port"
+
+    def __init__(self, client, entry: ConfigEntry) -> None:
+        self._client = client
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_input"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(identifiers={(DOMAIN, self._entry.entry_id)})
+
+    @property
+    def available(self) -> bool:
+        return self._client.is_connected()
+
+    def _inputs(self) -> dict[str, str]:
+        """Map of display label -> input id (e.g. {"PS5": "HDMI_2"})."""
+        inputs: dict[str, str] = {}
+        for inp in (self._client.inputs or {}).values():
+            label = inp.get("label") or inp.get("id")
+            if label and inp.get("id"):
+                inputs[label] = inp["id"]
+        return inputs
+
+    @property
+    def options(self) -> list[str]:
+        return list(self._inputs().keys())
+
+    @property
+    def current_option(self) -> str | None:
+        current = self._client.current_appId
+        if not current:
+            return None
+        for inp in (self._client.inputs or {}).values():
+            if inp.get("appId") == current:
+                return inp.get("label") or inp.get("id")
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        input_id = self._inputs().get(option)
+        if input_id is None:
+            _LOGGER.warning("Input '%s' not found in input list", option)
+            return
+        await async_guarded_call(
+            self.hass,
+            self._entry.entry_id,
+            lambda: self._client.set_input(input_id),
+        )

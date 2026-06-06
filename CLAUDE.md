@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Home Assistant **custom integration** (`custom_components/lgtv_ha/`, domain `lgtv_ha`) that controls an LG webOS TV over the LAN. It exposes a `media_player` (power/source/volume/playback), a `number` (OLED brightness), a `select` (picture mode), and a `lgtv_ha.set_oled_light` service. It talks to the TV via the `bscpylgtv` (`WebOsClient`) library.
+A Home Assistant **custom integration** (`custom_components/lgtv_ha/`, domain `lgtv_ha`) that controls an LG webOS TV over the LAN. It exposes a `media_player` (power/source/volume/playback/sound-output), four picture `number` sliders (OLED brightness/backlight, contrast, brightness, color — all driven by `PICTURE_NUMBERS` in `const.py`), two `select`s (picture mode + physical Input), two `button`s (screen on/off), and two services (`lgtv_ha.set_oled_light`, `lgtv_ha.send_message` for TV toasts). It talks to the TV via the `bscpylgtv` (`WebOsClient`) library.
 
 There is no build, lint, or test tooling in this repo. "Running" it means deploying into a Home Assistant instance.
 
@@ -29,7 +29,7 @@ Standard HA config-entry lifecycle, one shared `WebOsClient` per entry:
 - `__init__.py` — `async_setup_entry` builds the client (in an executor — its `__init__` does blocking SSL setup), tries to connect (but does **not** fail setup if the TV is off — a TV is usually off), stores client + an `asyncio.Lock` under `hass.data[DOMAIN][entry_id]`, forwards the platforms, registers the `set_oled_light` service, and starts a background `_health_loop` (every 15s → `async_health_check`). Also backfills the TV's MAC (via `ip neigh`) for Wake-on-LAN.
 - `connection.py` — connection health/recovery. `async_is_alive` probes with a timeout-bounded `get_power_state()`; `async_health_check` reconnects (disconnect→connect) when not alive; `async_guarded_call(hass, entry_id, factory)` runs a command and, on failure, forces one reconnect and retries once. A per-entry lock serializes reconnects. **All entity writes and the service go through `async_guarded_call`.**
 - `config_flow.py` — single-step flow: connect (pairing prompt, generous `wait_for`), read `client.client_key`, store `{host, client_key, mac_address}`.
-- `media_player.py` / `number.py` / `select.py` — the three entities. All **poll** (`SCAN_INTERVAL = 10s`); none register state-update callbacks. The connection stays open, so bscpylgtv's *internal* subscriptions keep the client's properties fresh between polls.
+- `media_player.py` / `number.py` / `select.py` / `button.py` — the entities. `number.py` builds one `LGTVPictureNumber` per `PICTURE_NUMBERS` entry (generic 0-100 picture-key slider; **backlight keeps the legacy `_oled_brightness` unique_id** so the original entity isn't recreated). `select.py` has both Picture Mode and a physical-only `LGTVInput`. All **poll** (`SCAN_INTERVAL = 10s`); none register state-update callbacks. The connection stays open, so bscpylgtv's *internal* subscriptions keep the client's properties fresh between polls. **Every write (entities, buttons, both services) goes through `async_guarded_call`.**
 - `key_storage.py` — `InMemoryKeyStorage`, a `StorageProto` stub so bscpylgtv doesn't persist the key to its own SQLite file (we use the config entry) and so first-time pairing's `storage.set_key(...)` doesn't `AttributeError`.
 - `const.py` — `DOMAIN`, `PLATFORMS`, `CONF_*`, `PICTURE_MODES`, service/attr names.
 

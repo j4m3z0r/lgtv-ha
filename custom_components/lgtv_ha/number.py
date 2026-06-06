@@ -10,7 +10,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .connection import async_guarded_call
-from .const import DOMAIN
+from .const import DOMAIN, PICTURE_NUMBERS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,23 +23,32 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     client = hass.data[DOMAIN][entry.entry_id]["client"]
-    async_add_entities([LGTVOledBrightness(client, entry)])
+    async_add_entities(
+        LGTVPictureNumber(client, entry, key=key, name=name, icon=icon)
+        for key, name, icon in PICTURE_NUMBERS
+    )
 
 
-class LGTVOledBrightness(NumberEntity):
+class LGTVPictureNumber(NumberEntity):
+    """A 0-100 webOS picture setting (backlight, contrast, brightness, color)."""
+
     _attr_has_entity_name = True
-    _attr_name = "OLED Brightness"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 1
     _attr_mode = NumberMode.SLIDER
-    _attr_icon = "mdi:brightness-6"
 
-    def __init__(self, client, entry: ConfigEntry) -> None:
+    def __init__(self, client, entry: ConfigEntry, *, key: str, name: str, icon: str) -> None:
         self._client = client
         self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_oled_brightness"
-        self._oled_light: int | None = None
+        self._key = key
+        self._attr_name = name
+        self._attr_icon = icon
+        # Preserve the original unique_id for OLED Brightness so the existing
+        # entity (and its history/customizations) survives this refactor.
+        suffix = "oled_brightness" if key == "backlight" else f"picture_{key}"
+        self._attr_unique_id = f"{entry.entry_id}_{suffix}"
+        self._value: int | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -51,19 +60,18 @@ class LGTVOledBrightness(NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self._oled_light
+        return self._value
 
     async def async_update(self) -> None:
-        # "backlight" is the webOS key for the OLED Light slider.
         if not self._client.is_connected():
             return
         try:
-            settings = await self._client.get_picture_settings(["backlight"])
-            val = settings.get("backlight")
+            settings = await self._client.get_picture_settings([self._key])
+            val = settings.get(self._key)
             if val is not None:
-                self._oled_light = int(val)
+                self._value = int(val)
         except Exception as ex:  # noqa: BLE001
-            _LOGGER.debug("Could not read backlight: %s", ex)
+            _LOGGER.debug("Could not read picture setting %s: %s", self._key, ex)
 
     async def async_set_native_value(self, value: float) -> None:
         int_value = int(value)
@@ -73,7 +81,7 @@ class LGTVOledBrightness(NumberEntity):
         await async_guarded_call(
             self.hass,
             self._entry.entry_id,
-            lambda: self._client.set_settings("picture", {"backlight": int_value}),
+            lambda: self._client.set_settings("picture", {self._key: int_value}),
         )
-        self._oled_light = int_value
+        self._value = int_value
         self.async_write_ha_state()

@@ -14,12 +14,14 @@ from homeassistant.core import HomeAssistant, ServiceCall
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
+    ATTR_MESSAGE,
     ATTR_PICTURE_MODE,
     ATTR_VALUE,
     CONF_CLIENT_KEY,
     CONF_MAC,
     DOMAIN,
     PLATFORMS,
+    SERVICE_SEND_MESSAGE,
     SERVICE_SET_OLED_LIGHT,
 )
 from .connection import async_guarded_call, async_health_check
@@ -38,6 +40,12 @@ SET_OLED_LIGHT_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_PICTURE_MODE): cv.string,
         vol.Required(ATTR_VALUE): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+    }
+)
+
+SEND_MESSAGE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_MESSAGE): cv.string,
     }
 )
 
@@ -160,4 +168,22 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_OLED_LIGHT,
         handle_set_oled_light,
         schema=SET_OLED_LIGHT_SCHEMA,
+    )
+
+    async def handle_send_message(call: ServiceCall) -> None:
+        message = call.data[ATTR_MESSAGE]
+        for entry_id, data in hass.data.get(DOMAIN, {}).items():
+            client = data["client"]
+            try:
+                await async_guarded_call(
+                    hass, entry_id, lambda client=client: client.send_message(message)
+                )
+            except Exception as ex:  # noqa: BLE001
+                _LOGGER.warning("send_message failed for %s: %s", entry_id, ex)
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+        handle_send_message,
+        schema=SEND_MESSAGE_SCHEMA,
     )

@@ -33,3 +33,16 @@ set_oled_light:
           max: 100
           step: 1
           mode: slider
+
+send_message:
+  name: Send message
+  description: >
+    Show a floating toast message on the TV screen (the TV must be on).
+  fields:
+    message:
+      name: Message
+      description: Text to display on the TV.
+      required: true
+      example: Dinner is ready!
+      selector:
+        text:

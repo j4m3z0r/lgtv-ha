@@ -13,13 +13,20 @@ over the local network.
   - Play / pause / stop.
   - Sound output selection (sound mode): TV speaker, HDMI-ARC, optical,
     Bluetooth, etc.
-- **OLED Brightness** (`number`) — read and set the OLED light level for the
-  current input.
+- **Picture sliders** (`number`) — read and set, for the current input:
+  - **OLED Brightness** (OLED light / backlight)
+  - **Contrast**
+  - **Brightness** (black level)
+  - **Color** (saturation)
+- **Input** (`select`) — switch directly between the TV's physical inputs
+  (HDMI 1–4, AV, …). The media player's source list also offers these, mixed in
+  with apps; this entity is a clean inputs-only control.
 - **Picture Mode** (`select`) — set the picture mode.
 - **Screen On / Screen Off** (`button`) — turn the OLED panel off while audio
   keeps playing, and back on.
 - **`lgtv_ha.set_oled_light` service** — set the OLED light level, optionally
   for a specific picture mode.
+- **`lgtv_ha.send_message` service** — show a floating toast message on the TV.
 
 ## Requirements
 
