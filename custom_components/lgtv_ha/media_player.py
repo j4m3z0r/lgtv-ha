@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_MAC, DOMAIN
+from .const import CONF_MAC, DOMAIN, SOUND_OUTPUTS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ SUPPORTED_FEATURES = (
     | MediaPlayerEntityFeature.PLAY
     | MediaPlayerEntityFeature.PAUSE
     | MediaPlayerEntityFeature.STOP
+    | MediaPlayerEntityFeature.SELECT_SOUND_MODE
 )
 
 
@@ -89,27 +90,59 @@ class LGTVMediaPlayer(MediaPlayerEntity):
     def is_volume_muted(self) -> bool | None:
         return self._client.muted
 
+    def _sources(self) -> dict[str, dict]:
+        """Map of selectable source name -> action descriptor.
+
+        Combines physical inputs (HDMI etc.) with launchable apps (Netflix,
+        YouTube, ...). Inputs win over the app launch-points that represent the
+        same thing (e.g. the HDMI apps), so each input appears once.
+        """
+        inputs = self._client.inputs or {}
+        apps = self._client.apps or {}
+        sources: dict[str, dict] = {}
+        input_app_ids = set()
+        for inp in inputs.values():
+            name = inp.get("label") or inp.get("id")
+            if name:
+                sources[name] = {"kind": "input", "id": inp["id"]}
+                if inp.get("appId"):
+                    input_app_ids.add(inp["appId"])
+        for app in apps.values():
+            app_id = app.get("id")
+            title = app.get("title")
+            if title and app_id and app_id not in input_app_ids:
+                sources.setdefault(title, {"kind": "app", "id": app_id, "app_id": app_id})
+        return sources
+
     @property
     def source_list(self) -> list[str]:
-        inputs = self._client.inputs or {}
-        return [
-            inp.get("label") or inp.get("id", "")
-            for inp in inputs.values()
-            if inp.get("label") or inp.get("id")
-        ]
+        return list(self._sources().keys())
 
     @property
     def source(self) -> str | None:
-        inputs = self._client.inputs or {}
         current = self._client.current_appId
+        if not current:
+            return None
+        inputs = self._client.inputs or {}
         for inp in inputs.values():
             if inp.get("appId") == current:
                 return inp.get("label") or inp.get("id")
+        app = (self._client.apps or {}).get(current)
+        if app:
+            return app.get("title")
         return None
 
     @property
     def sound_mode(self) -> str | None:
         return self._client.sound_output
+
+    @property
+    def sound_mode_list(self) -> list[str]:
+        # Include the current output even if it's not in our static list.
+        current = self._client.sound_output
+        if current and current not in SOUND_OUTPUTS:
+            return [current, *SOUND_OUTPUTS]
+        return SOUND_OUTPUTS
 
     async def async_turn_on(self) -> None:
         mac = self._entry.data.get(CONF_MAC)
@@ -122,12 +155,17 @@ class LGTVMediaPlayer(MediaPlayerEntity):
         await self._client.power_off()
 
     async def async_select_source(self, source: str) -> None:
-        inputs = self._client.inputs or {}
-        for inp in inputs.values():
-            if inp.get("label") == source or inp.get("id") == source:
-                await self._client.set_input(inp["id"])
-                return
-        _LOGGER.warning("Source '%s' not found in input list", source)
+        target = self._sources().get(source)
+        if target is None:
+            _LOGGER.warning("Source '%s' not found in source list", source)
+            return
+        if target["kind"] == "input":
+            await self._client.set_input(target["id"])
+        else:
+            await self._client.launch_app(target["app_id"])
+
+    async def async_select_sound_mode(self, sound_mode: str) -> None:
+        await self._client.change_sound_output(sound_mode)
 
     async def async_set_volume_level(self, volume: float) -> None:
         await self._client.set_volume(int(volume * 100))

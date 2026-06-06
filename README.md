@@ -5,11 +5,19 @@ over the local network.
 
 ## Features
 
-- **Media player** — power on (Wake-on-LAN) / off, input/source selection,
-  volume set / mute / up / down, and play / pause / stop.
+- **Media player**
+  - Power on (Wake-on-LAN) / off.
+  - Source selection across both physical inputs (HDMI, AV) **and** installed
+    apps (Netflix, YouTube, Disney+, …).
+  - Volume set / mute / up / down.
+  - Play / pause / stop.
+  - Sound output selection (sound mode): TV speaker, HDMI-ARC, optical,
+    Bluetooth, etc.
 - **OLED Brightness** (`number`) — read and set the OLED light level for the
   current input.
 - **Picture Mode** (`select`) — set the picture mode.
+- **Screen On / Screen Off** (`button`) — turn the OLED panel off while audio
+  keeps playing, and back on.
 - **`lgtv_ha.set_oled_light` service** — set the OLED light level, optionally
   for a specific picture mode.
 
