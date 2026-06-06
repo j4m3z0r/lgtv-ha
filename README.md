@@ -36,12 +36,34 @@ over the local network.
 
 ## Installation
 
+### Option A — HACS (recommended)
+
+This repository is a valid [HACS](https://hacs.xyz/) custom integration. It isn't
+in the HACS default store, so add it as a custom repository:
+
+1. In Home Assistant, open **HACS**.
+2. Click the **⋮** menu (top-right) → **Custom repositories**.
+3. Enter the repository URL `https://github.com/j4m3z0r/lgtv-ha`, choose
+   category **Integration**, and click **Add**.
+4. Find **"LG TV (lgtv_ha)"** in the list, open it, and click **Download**.
+5. **Restart Home Assistant.**
+6. Continue with [Configuration](#configuration) below.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=j4m3z0r&repository=lgtv-ha&category=integration)
+
+HACS will offer updates whenever a new release is published here.
+
+### Option B — Manual
+
 1. Copy `custom_components/lgtv_ha/` into your Home Assistant `custom_components`
    directory.
-2. Restart Home Assistant.
-3. Go to **Settings → Devices & Services → + Add Integration**, search for
+2. **Restart Home Assistant.**
+
+### Configuration
+
+1. Go to **Settings → Devices & Services → + Add Integration**, search for
    **"LG TV"**, and enter the TV's hostname or IP.
-4. Accept the pairing prompt that appears on the TV. The resulting client key is
+2. Accept the pairing prompt that appears on the TV. The resulting client key is
    stored in the config entry, so you only pair once — it survives restarts.
 
 ## Notes & limitations

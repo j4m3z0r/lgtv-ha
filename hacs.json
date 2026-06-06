@@ -1,0 +1,5 @@
+{
+  "name": "LG TV (lgtv_ha)",
+  "homeassistant": "2023.1.0",
+  "render_readme": true
+}
