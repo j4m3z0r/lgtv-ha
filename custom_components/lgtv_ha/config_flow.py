@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
 import subprocess
 from functools import partial
 
@@ -69,10 +70,15 @@ class LGTVConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 def _get_mac_address(host: str) -> str | None:
-    """Return the MAC address for host via ARP, or None if not found."""
+    """Return the MAC address for host via ARP, or None if not found.
+
+    ``ip neigh show`` filters by IP, not hostname, so resolve to the IP first;
+    otherwise it lists every neighbour and we'd match an arbitrary device.
+    """
     try:
+        ip = socket.gethostbyname(host)
         result = subprocess.run(
-            ["ip", "neigh", "show", host],
+            ["ip", "neigh", "show", ip],
             capture_output=True, text=True, timeout=5,
         )
         match = re.search(

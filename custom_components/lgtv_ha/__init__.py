@@ -6,6 +6,7 @@ from functools import partial
 
 import voluptuous as vol
 import re
+import socket
 import subprocess
 
 from homeassistant.config_entries import ConfigEntry
@@ -84,13 +85,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ex,
         )
 
-    # Backfill MAC address if missing from an older config entry
-    if not entry.data.get(CONF_MAC):
-        mac = _get_mac_address(host)
-        if mac:
-            hass.config_entries.async_update_entry(
-                entry, data={**entry.data, CONF_MAC: mac}
-            )
+    # Backfill / self-heal the MAC used for Wake-on-LAN. Detection is run in an
+    # executor (it does blocking DNS + subprocess work). We update whenever a
+    # MAC is detected that differs from what's stored, so a previously-wrong
+    # value (e.g. an unrelated neighbour picked up by older buggy detection)
+    # gets corrected once the TV is reachable.
+    mac = await hass.async_add_executor_job(_get_mac_address, host)
+    if mac and mac != entry.data.get(CONF_MAC):
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_MAC: mac}
+        )
 
     # The lock serializes reconnects across the entities and the health loop.
     hass.data[DOMAIN][entry.entry_id] = {"client": client, "lock": asyncio.Lock()}
@@ -111,7 +115,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         client = hass.data[DOMAIN].pop(entry.entry_id)["client"]
-        await client.disconnect()
+        # Bound the disconnect: a zombie connection's disconnect() can hang
+        # indefinitely, which would otherwise wedge unload/reload and leave
+        # every entity stuck unavailable with no way to rebuild the client.
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=8)
+        except Exception:  # noqa: BLE001
+            pass
     return unload_ok
 
 
@@ -125,9 +135,17 @@ async def _health_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 def _get_mac_address(host: str) -> str | None:
+    """Return the TV's MAC via the neighbour table, or None if not found.
+
+    ``ip neigh show`` filters by IP, not hostname: passing a hostname makes it
+    ignore the filter and list *every* neighbour, so the old code matched the
+    first arbitrary lladdr (a different device entirely). Resolve to the IP
+    first so we look up the right host.
+    """
     try:
+        ip = socket.gethostbyname(host)
         result = subprocess.run(
-            ["ip", "neigh", "show", host],
+            ["ip", "neigh", "show", ip],
             capture_output=True, text=True, timeout=5,
         )
         match = re.search(

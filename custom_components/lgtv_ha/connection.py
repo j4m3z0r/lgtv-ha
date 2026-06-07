@@ -18,6 +18,11 @@ _LOGGER = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 5
 RECONNECT_TIMEOUT = 15
+# A zombie connection's disconnect() can hang forever (bscpylgtv awaits a
+# close handshake the dead socket never completes). Bounding it ensures the
+# health loop / reload can always proceed to a fresh connect instead of
+# wedging the whole entry.
+DISCONNECT_TIMEOUT = 8
 
 
 async def async_is_alive(client) -> bool:
@@ -37,8 +42,8 @@ async def _async_force_reconnect(client) -> bool:
     Callers must hold the per-entry lock.
     """
     try:
-        await client.disconnect()
-    except Exception:  # noqa: BLE001
+        await asyncio.wait_for(client.disconnect(), timeout=DISCONNECT_TIMEOUT)
+    except Exception:  # noqa: BLE001 - a hung/zombie disconnect must not block the reconnect
         pass
     try:
         await asyncio.wait_for(client.connect(), timeout=RECONNECT_TIMEOUT)
