@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -9,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .connection import async_guarded_call
+from .connection import READ_TIMEOUT, async_guarded_call
 from .const import DOMAIN, PICTURE_NUMBERS
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,7 +67,10 @@ class LGTVPictureNumber(NumberEntity):
         if not self._client.is_connected():
             return
         try:
-            settings = await self._client.get_picture_settings([self._key])
+            settings = await asyncio.wait_for(
+                self._client.get_picture_settings([self._key]),
+                timeout=READ_TIMEOUT,
+            )
             val = settings.get(self._key)
             if val is not None:
                 self._value = int(val)
