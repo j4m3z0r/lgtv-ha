@@ -7,11 +7,11 @@ from datetime import timedelta
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .connection import READ_TIMEOUT, async_guarded_call
-from .const import DOMAIN, PICTURE_NUMBERS
+from .const import PICTURE_NUMBERS
+from .entity import LGTVEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,14 +23,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    client = hass.data[DOMAIN][entry.entry_id]["client"]
     async_add_entities(
-        LGTVPictureNumber(client, entry, key=key, name=name, icon=icon)
+        LGTVPictureNumber(entry, key=key, name=name, icon=icon)
         for key, name, icon in PICTURE_NUMBERS
     )
 
 
-class LGTVPictureNumber(NumberEntity):
+class LGTVPictureNumber(LGTVEntity, NumberEntity):
     """A 0-100 webOS picture setting (backlight, contrast, brightness, color)."""
 
     _attr_has_entity_name = True
@@ -39,8 +38,7 @@ class LGTVPictureNumber(NumberEntity):
     _attr_native_step = 1
     _attr_mode = NumberMode.SLIDER
 
-    def __init__(self, client, entry: ConfigEntry, *, key: str, name: str, icon: str) -> None:
-        self._client = client
+    def __init__(self, entry: ConfigEntry, *, key: str, name: str, icon: str) -> None:
         self._entry = entry
         self._key = key
         self._attr_name = name
@@ -50,14 +48,6 @@ class LGTVPictureNumber(NumberEntity):
         suffix = "oled_brightness" if key == "backlight" else f"picture_{key}"
         self._attr_unique_id = f"{entry.entry_id}_{suffix}"
         self._value: int | None = None
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._entry.entry_id)})
-
-    @property
-    def available(self) -> bool:
-        return self._client.is_connected()
 
     @property
     def native_value(self) -> float | None:
@@ -85,7 +75,7 @@ class LGTVPictureNumber(NumberEntity):
         await async_guarded_call(
             self.hass,
             self._entry.entry_id,
-            lambda: self._client.set_settings("picture", {self._key: int_value}),
+            lambda client: client.set_settings("picture", {self._key: int_value}),
         )
         self._value = int_value
         self.async_write_ha_state()
