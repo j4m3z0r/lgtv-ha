@@ -7,11 +7,11 @@ from datetime import timedelta
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .connection import READ_TIMEOUT, async_guarded_call
-from .const import DOMAIN, PICTURE_MODES
+from .const import PICTURE_MODES
+from .entity import LGTVEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,29 +23,19 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    client = hass.data[DOMAIN][entry.entry_id]["client"]
-    async_add_entities([LGTVPictureMode(client, entry), LGTVInput(client, entry)])
+    async_add_entities([LGTVPictureMode(entry), LGTVInput(entry)])
 
 
-class LGTVPictureMode(SelectEntity):
+class LGTVPictureMode(LGTVEntity, SelectEntity):
     _attr_has_entity_name = True
     _attr_name = "Picture Mode"
     _attr_icon = "mdi:palette"
     _attr_options = PICTURE_MODES
 
-    def __init__(self, client, entry: ConfigEntry) -> None:
-        self._client = client
+    def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_picture_mode"
         self._picture_mode: str | None = None
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._entry.entry_id)})
-
-    @property
-    def available(self) -> bool:
-        return self._client.is_connected()
 
     @property
     def current_option(self) -> str | None:
@@ -70,13 +60,13 @@ class LGTVPictureMode(SelectEntity):
         await async_guarded_call(
             self.hass,
             self._entry.entry_id,
-            lambda: self._client.set_settings("picture", {"pictureMode": option}),
+            lambda client: client.set_settings("picture", {"pictureMode": option}),
         )
         self._picture_mode = option
         self.async_write_ha_state()
 
 
-class LGTVInput(SelectEntity):
+class LGTVInput(LGTVEntity, SelectEntity):
     """Selects the active physical input (HDMI, etc.).
 
     The media_player's source list also includes inputs, but mixes in apps;
@@ -87,18 +77,9 @@ class LGTVInput(SelectEntity):
     _attr_name = "Input"
     _attr_icon = "mdi:hdmi-port"
 
-    def __init__(self, client, entry: ConfigEntry) -> None:
-        self._client = client
+    def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_input"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._entry.entry_id)})
-
-    @property
-    def available(self) -> bool:
-        return self._client.is_connected()
 
     def _inputs(self) -> dict[str, str]:
         """Map of display label -> input id (e.g. {"PS5": "HDMI_2"})."""
@@ -131,5 +112,5 @@ class LGTVInput(SelectEntity):
         await async_guarded_call(
             self.hass,
             self._entry.entry_id,
-            lambda: self._client.set_input(input_id),
+            lambda client: client.set_input(input_id),
         )

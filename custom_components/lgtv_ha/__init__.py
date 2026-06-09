@@ -25,7 +25,7 @@ from .const import (
     SERVICE_SEND_MESSAGE,
     SERVICE_SET_OLED_LIGHT,
 )
-from .connection import async_guarded_call, async_health_check
+from .connection import async_guarded_call, async_health_check, release_client
 from .key_storage import InMemoryKeyStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,20 +58,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     host = entry.data[CONF_HOST]
     client_key = entry.data.get(CONF_CLIENT_KEY)
+
     # The key is loaded from the (persisted) config entry, so a paired TV
     # reconnects on restart without prompting to pair again.
     # Construct off the event loop: WebOsClient builds an SSL context in its
     # __init__, which does blocking file I/O (loading CA certificates).
-    client = await hass.async_add_executor_job(
-        partial(
-            WebOsClient,
-            host,
-            client_key=client_key,
-            storage=InMemoryKeyStorage(client_key),
-            timeout_connect=10,
-            connect_retry_attempts=CONNECT_RETRY_ATTEMPTS,
+    #
+    # Recovery replaces the whole client object (a zombie connection can't be
+    # safely reused — see connection.py), so the build is a reusable factory the
+    # health loop / guarded calls invoke to mint a fresh client.
+    async def make_client():
+        return await hass.async_add_executor_job(
+            partial(
+                WebOsClient,
+                host,
+                client_key=client_key,
+                storage=InMemoryKeyStorage(client_key),
+                timeout_connect=10,
+                connect_retry_attempts=CONNECT_RETRY_ATTEMPTS,
+            )
         )
-    )
+
+    client = await make_client()
 
     # A TV is off most of the time, so don't fail setup when it's unreachable:
     # set up anyway (entities show unavailable) and let the health loop connect
@@ -97,7 +105,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # The lock serializes reconnects across the entities and the health loop.
-    hass.data[DOMAIN][entry.entry_id] = {"client": client, "lock": asyncio.Lock()}
+    # ``make_client`` lets recovery mint a fresh client; entities read ``client``
+    # dynamically (it is replaced on reconnect), so they must not cache it.
+    hass.data[DOMAIN][entry.entry_id] = {
+        "client": client,
+        "lock": asyncio.Lock(),
+        "make_client": make_client,
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_services(hass)
@@ -115,13 +129,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         client = hass.data[DOMAIN].pop(entry.entry_id)["client"]
-        # Bound the disconnect: a zombie connection's disconnect() can hang
-        # indefinitely, which would otherwise wedge unload/reload and leave
-        # every entity stuck unavailable with no way to rebuild the client.
-        try:
-            await asyncio.wait_for(client.disconnect(), timeout=8)
-        except Exception:  # noqa: BLE001
-            pass
+        # Never await disconnect() here: a zombie connection's disconnect() is
+        # uncancellable and would hang forever (see connection.py), wedging
+        # unload/reload and leaving every entity stuck unavailable. Abandon the
+        # client instead — the next setup builds a fresh one.
+        release_client(client)
     return unload_ok
 
 
@@ -164,10 +176,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def handle_set_oled_light(call: ServiceCall) -> None:
         value = call.data[ATTR_VALUE]
         pic_mode = call.data.get(ATTR_PICTURE_MODE)
-        for entry_id, data in hass.data.get(DOMAIN, {}).items():
-            client = data["client"]
+        for entry_id in list(hass.data.get(DOMAIN, {})):
 
-            async def _apply(client=client):
+            async def _apply(client):
                 # Switch picture mode first (if requested) so the OLED light
                 # value applies to that mode. "backlight" is the webOS
                 # OLED-light key. Writes use the luna API (set_settings), per
@@ -190,11 +201,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def handle_send_message(call: ServiceCall) -> None:
         message = call.data[ATTR_MESSAGE]
-        for entry_id, data in hass.data.get(DOMAIN, {}).items():
-            client = data["client"]
+        for entry_id in list(hass.data.get(DOMAIN, {})):
             try:
                 await async_guarded_call(
-                    hass, entry_id, lambda client=client: client.send_message(message)
+                    hass, entry_id, lambda client: client.send_message(message)
                 )
             except Exception as ex:  # noqa: BLE001
                 _LOGGER.warning("send_message failed for %s: %s", entry_id, ex)

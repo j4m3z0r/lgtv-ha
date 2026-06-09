@@ -17,6 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .connection import async_guarded_call
 from .const import CONF_MAC, DOMAIN, SOUND_OUTPUTS
+from .entity import LGTVEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,18 +44,16 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    client = hass.data[DOMAIN][entry.entry_id]["client"]
-    async_add_entities([LGTVMediaPlayer(client, entry)])
+    async_add_entities([LGTVMediaPlayer(entry)])
 
 
-class LGTVMediaPlayer(MediaPlayerEntity):
+class LGTVMediaPlayer(LGTVEntity, MediaPlayerEntity):
     _attr_device_class = MediaPlayerDeviceClass.TV
     _attr_has_entity_name = True
     _attr_name = None
     _attr_supported_features = SUPPORTED_FEATURES
 
-    def __init__(self, client, entry: ConfigEntry) -> None:
-        self._client = client
+    def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_media_player"
 
@@ -69,10 +68,6 @@ class LGTVMediaPlayer(MediaPlayerEntity):
             model=sys_info.get("modelName"),
             sw_version=sw_info.get("major_ver"),
         )
-
-    @property
-    def available(self) -> bool:
-        return self._client.is_connected()
 
     @property
     def state(self) -> MediaPlayerState:
@@ -154,10 +149,10 @@ class LGTVMediaPlayer(MediaPlayerEntity):
         if mac:
             _send_wol(mac)
         else:
-            await self._call(lambda: self._client.power_on())
+            await self._call(lambda client: client.power_on())
 
     async def async_turn_off(self) -> None:
-        await self._call(lambda: self._client.power_off())
+        await self._call(lambda client: client.power_off())
 
     async def async_select_source(self, source: str) -> None:
         target = self._sources().get(source)
@@ -165,33 +160,33 @@ class LGTVMediaPlayer(MediaPlayerEntity):
             _LOGGER.warning("Source '%s' not found in source list", source)
             return
         if target["kind"] == "input":
-            await self._call(lambda: self._client.set_input(target["id"]))
+            await self._call(lambda client: client.set_input(target["id"]))
         else:
-            await self._call(lambda: self._client.launch_app(target["app_id"]))
+            await self._call(lambda client: client.launch_app(target["app_id"]))
 
     async def async_select_sound_mode(self, sound_mode: str) -> None:
-        await self._call(lambda: self._client.change_sound_output(sound_mode))
+        await self._call(lambda client: client.change_sound_output(sound_mode))
 
     async def async_set_volume_level(self, volume: float) -> None:
-        await self._call(lambda: self._client.set_volume(int(volume * 100)))
+        await self._call(lambda client: client.set_volume(int(volume * 100)))
 
     async def async_mute_volume(self, mute: bool) -> None:
-        await self._call(lambda: self._client.set_mute(mute))
+        await self._call(lambda client: client.set_mute(mute))
 
     async def async_volume_up(self) -> None:
-        await self._call(lambda: self._client.volume_up())
+        await self._call(lambda client: client.volume_up())
 
     async def async_volume_down(self) -> None:
-        await self._call(lambda: self._client.volume_down())
+        await self._call(lambda client: client.volume_down())
 
     async def async_media_play(self) -> None:
-        await self._call(lambda: self._client.play())
+        await self._call(lambda client: client.play())
 
     async def async_media_pause(self) -> None:
-        await self._call(lambda: self._client.pause())
+        await self._call(lambda client: client.pause())
 
     async def async_media_stop(self) -> None:
-        await self._call(lambda: self._client.stop())
+        await self._call(lambda client: client.stop())
 
 
 def _send_wol(mac: str) -> None:
