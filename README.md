@@ -66,6 +66,19 @@ HACS will offer updates whenever a new release is published here.
 2. Accept the pairing prompt that appears on the TV. The resulting client key is
    stored in the config entry, so you only pair once — it survives restarts.
 
+### Re-pairing after a TV reset
+
+If you factory-reset the TV (or it otherwise forgets Home Assistant), the stored
+client key stops working — the TV rejects it and every entity goes
+**unavailable**. Re-pair without removing the integration:
+
+1. Go to **Settings → Devices & Services**, open the **LG TV** entry, and choose
+   **⋮ → Reconfigure**.
+2. Confirm the host and accept the new pairing prompt on the TV.
+
+The existing entry is updated in place with a fresh key, so your entity IDs,
+automations, and history are preserved.
+
 ## Notes & limitations
 
 - **Polling.** State is refreshed about every 10 seconds (the connection is held

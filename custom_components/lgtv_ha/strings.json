@@ -7,6 +7,13 @@
         "data": {
           "host": "IP Address or Hostname"
         }
+      },
+      "reconfigure": {
+        "title": "Re-pair LG TV",
+        "description": "Re-pair with the TV to refresh its connection key (needed after a TV factory reset invalidates it). A pairing prompt will appear on the TV — accept it with your remote.",
+        "data": {
+          "host": "IP Address or Hostname"
+        }
       }
     },
     "error": {
@@ -15,7 +22,8 @@
       "unknown": "Unexpected error."
     },
     "abort": {
-      "already_configured": "This TV is already configured."
+      "already_configured": "This TV is already configured.",
+      "reconfigure_successful": "Re-paired with the TV successfully."
     }
   }
 }
